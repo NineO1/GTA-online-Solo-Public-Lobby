@@ -2,8 +2,7 @@ name: Build Windows onefile EXE
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
   release:
     types: [created]
@@ -16,53 +15,64 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set Up Python 3.14.2
+      - name: Set Up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: '3.14.2'
+          python-version: '3.12'
 
       - name: Verify Python and Pip
         run: |
-          echo "Python version:"
           python --version
-          echo "Pip version:"
           pip --version
 
       - name: Clear PIP Cache
         run: python -m pip cache purge
 
-      - name: Remove Existing Virtual Environment
+      - name: Install PyInstaller (global)
         run: |
-          if (Test-Path "venv") {
-            Remove-Item -Recurse -Force "venv"
-          }
-
-      - name: Create and Activate Virtual Environment
-        run: |
-          python -m venv venv
-          venv\Scripts\python -m pip install --upgrade pip
-          venv\Scripts\python -m pip install pyinstaller==6.18.0
-          venv\Scripts\python -m pyinstaller --version
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller==6.18.0
+          python -m pyinstaller --version
 
       - name: Ensure Icons Exist
+        shell: pwsh
         run: |
-          if (!(Test-Path "GTAO.ico")) {
-            Write-Host "GTAO.ico not found"
-            exit 1
-          }
-          if (!(Test-Path "GTAO_active.ico")) {
-            Write-Host "GTAO_active.ico not found"
-            exit 1
-          }
+          if (!(Test-Path "GTAO.ico")) { Write-Host "GTAO.ico not found"; exit 1 }
+          if (!(Test-Path "GTAO_active.ico")) { Write-Host "GTAO_active.ico not found"; exit 1 }
 
       - name: Build EXE with PyInstaller
         run: |
-          venv\Scripts\python -m PyInstaller `
-            --onefile `
-            --name "Solo_Public_Lobby_V-Online" `
-            --uac-admin `
-            --windowed `
-            --icon="GTAO.ico" `
-            --add-data "GTAO_active.ico;." `
-            --clean `
+          python -m PyInstaller ^
+            --onefile ^
+            --name "Solo_Public_Lobby_V-Online" ^
+            --uac-admin ^
+            --windowed ^
+            --icon="GTAO.ico" ^
+            --add-data "GTAO_active.ico;." ^
+            --clean ^
             create_rule_admin_gui_simple.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solo_Public_Lobby_V-Online-windows-exe
+          path: dist/Solo_Public_Lobby_V-Online.exe
+
+  release-upload:
+    name: Upload to release (on release created)
+    runs-on: windows-latest
+    needs: build-windows
+    if: github.event_name == 'release'
+    steps:
+      - name: Download artifact from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: Solo_Public_Lobby_V-Online-windows-exe
+          path: ./artifact
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./artifact/Solo_Public_Lobby_V-Online.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
