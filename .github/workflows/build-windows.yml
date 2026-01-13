@@ -13,52 +13,43 @@ jobs:
     name: Build Windows onefile EXE
     runs-on: windows-latest
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Set up Python environment
-      - name: Setup Python
+      - name: Set Up Python 3.14.2
         uses: actions/setup-python@v4
         with:
-          python-version: '3.14.2'
+          python-version: '3.14'
 
-      # Step 3: Verify paths for Python and Pip
       - name: Verify Python and Pip
         run: |
-          echo "Python path:"
-          which python
+          echo "Python version:"
           python --version
-          echo "Pip path:"
-          which pip
+          echo "Pip version:"
           pip --version
+          which python
+          which pip
 
-      # Step 4: Debug Python environment and paths
-      - name: Debug Python Environment
-        run: |
-          echo "PYTHONPATH: $PYTHONPATH"
-          echo "PATH: $PATH"
+      - name: Clear PIP Cache
+        run: python -m pip cache purge
 
-      # Step 5: Install dependencies
-      - name: Install Dependencies
+      - name: Create and Activate Virtual Environment
         run: |
-          python -m ensurepip --upgrade
+          python -m venv venv
+          source venv/Scripts/activate
           python -m pip install --upgrade pip
           python -m pip install pyinstaller
-          python -m pyinstaller --version  # Verify PyInstaller installation
+          python -m pyinstaller --version
 
-      # Step 6: Confirm installed packages
       - name: List Installed Packages
-        run: python -m pip list
+        run: venv/Scripts/python -m pip list
 
-      # Step 7: Download necessary icons
-      - name: Download icons
+      - name: Download Icons
         run: |
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO.ico" -OutFile "GTAO.ico"
           Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
 
-      # Step 8: Ensure downloaded icons exist
-      - name: Ensure icons exist
+      - name: Ensure Icons Exist
         run: |
           if (!(Test-Path "GTAO.ico")) {
             Write-Host "GTAO.ico not found"
@@ -69,10 +60,9 @@ jobs:
             exit 1
           }
 
-      # Step 9: Build the project using PyInstaller
-      - name: Build with PyInstaller
+      - name: Build EXE with PyInstaller
         run: |
-          python -m PyInstaller `
+          venv/Scripts/python -m PyInstaller `
             --onefile `
             --name "Solo_Public_Lobby_V-Online" `
             --uac-admin `
@@ -81,31 +71,3 @@ jobs:
             --add-data "GTAO_active.ico;." `
             --clean `
             create_rule_admin_gui_simple.py
-
-  release-upload:
-    name: Upload to release (on release created)
-    runs-on: windows-latest
-    needs: build-windows
-    if: github.event_name == 'release'
-    steps:
-      # Download artifact from previous build
-      - name: Download artifact from previous job
-        uses: actions/download-artifact@v4
-        with:
-          name: Solo_Public_Lobby_V-Online-windows-exe
-          path: ./artifact
-
-      # Upload release asset
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ./artifact/Solo_Public_Lobby_V-Online.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Upload the artifact for reference
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Solo_Public_Lobby_V-Online-windows-exe
-          path: dist/Solo_Public_Lobby_V-Online.exe
