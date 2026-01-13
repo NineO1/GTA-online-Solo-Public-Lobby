@@ -26,6 +26,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
 
+      - name: Download icons
+        run: |
+          Invoke-WebRequest -Uri "URL_TO_GTAO.ico" -OutFile "GTAO.ico"
+          Invoke-WebRequest -Uri "URL_TO_GTAO_active.ico" -OutFile "GTAO_active.ico"
+
       - name: Ensure icons exist
         run: |
           if (!(Test-Path "GTAO.ico")) {
