@@ -4,16 +4,16 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
-  release:
-    types: [created]
+workflow_dispatch:
+release:
+  types: [created]
 
 jobs:
   build-windows:
     name: Build Windows onefile EXE
     runs-on: windows-latest
     steps:
-            - name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
