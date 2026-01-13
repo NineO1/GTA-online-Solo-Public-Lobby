@@ -13,19 +13,33 @@ jobs:
     name: Build Windows onefile EXE
     runs-on: windows-latest
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Step 2: Set up Python environment
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
+      # Step 3: Verify paths for Python and Pip
       - name: Verify Python and Pip
         run: |
+          echo "Python path:"
           which python
+          python --version
+          echo "Pip path:"
           which pip
+          pip --version
 
+      # Step 4: Debug Python environment and paths
+      - name: Debug Python Environment
+        run: |
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "PATH: $PATH"
+
+      # Step 5: Install dependencies
       - name: Install Dependencies
         run: |
           python -m ensurepip --upgrade
@@ -33,9 +47,29 @@ jobs:
           python -m pip install pyinstaller
           python -m pyinstaller --version  # Verify PyInstaller installation
 
+      # Step 6: Confirm installed packages
       - name: List Installed Packages
         run: python -m pip list
 
+      # Step 7: Download necessary icons
+      - name: Download icons
+        run: |
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO.ico" -OutFile "GTAO.ico"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
+
+      # Step 8: Ensure downloaded icons exist
+      - name: Ensure icons exist
+        run: |
+          if (!(Test-Path "GTAO.ico")) {
+            Write-Host "GTAO.ico not found"
+            exit 1
+          }
+          if (!(Test-Path "GTAO_active.ico")) {
+            Write-Host "GTAO_active.ico not found"
+            exit 1
+          }
+
+      # Step 9: Build the project using PyInstaller
       - name: Build with PyInstaller
         run: |
           python -m PyInstaller `
@@ -54,12 +88,14 @@ jobs:
     needs: build-windows
     if: github.event_name == 'release'
     steps:
+      # Download artifact from previous build
       - name: Download artifact from previous job
         uses: actions/download-artifact@v4
         with:
           name: Solo_Public_Lobby_V-Online-windows-exe
           path: ./artifact
 
+      # Upload release asset
       - name: Upload release asset
         uses: softprops/action-gh-release@v1
         with:
@@ -67,6 +103,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Upload the artifact for reference
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
