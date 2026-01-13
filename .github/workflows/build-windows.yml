@@ -1,9 +1,12 @@
 name: Build Windows onefile EXE
 
 on:
-  workflow_dispatch: # Allows manual triggering of the workflow
+  push:
+    branches:
+      - main
+  workflow_dispatch:
   release:
-    types: [created] # Triggers on a release creation
+    types: [created]
 
 jobs:
   build-windows:
