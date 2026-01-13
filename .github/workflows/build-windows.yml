@@ -22,7 +22,27 @@ jobs:
           python-version: '3.10'
 
       - name: Verify Python Installation
-        run: python --version
+        run: |
+          python --version
+
+      - name: Check Pip and Python Paths
+        run: |
+          which python  # Verifies the Python executable being used
+          which pip     # Checks the pip location
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pyinstaller --version  # Verify PyInstaller installation
+
+      - name: List Installed Packages
+        run: |
+          python -m pip list
+
+      - name: Check Python Path
+        run: |
+          echo $PYTHONPATH
 
       - name: Install dependencies
         run: |
