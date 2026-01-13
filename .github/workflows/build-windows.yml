@@ -36,10 +36,9 @@ jobs:
       - name: Create and Activate Virtual Environment
         run: |
           python -m venv venv
-          venv\Scripts\Activate.ps1
-          python -m pip install --upgrade pip
-          python -m pip install pyinstaller
-          python -m pyinstaller --version
+          venv\Scripts\python -m pip install --upgrade pip
+          venv\Scripts\python -m pip install pyinstaller
+          venv\Scripts\python -m pyinstaller --version
 
       - name: List Installed Packages
         run: venv/Scripts/python -m pip list
@@ -62,7 +61,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          venv/Scripts/python -m PyInstaller `
+          venv\Scripts\python -m PyInstaller `
             --onefile `
             --name "Solo_Public_Lobby_V-Online" `
             --uac-admin `
