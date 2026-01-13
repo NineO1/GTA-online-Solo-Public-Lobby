@@ -135,10 +135,3 @@ Changelog
 - Keep a `CHANGELOG.md` and follow semantic versioning (MAJOR.MINOR.PATCH).
 
 ---
-
-If you want, I can:
-- Add a ready-to-commit `.github/ISSUE_TEMPLATE/bug_report.md` and `.github/workflows/build-windows.yml` for automated builds.
-- Add a LICENSE (MIT) file.
-- Add an About/Version dialog to the app so users can report exact version strings.
-
-Which of the above would you like me to create next?
