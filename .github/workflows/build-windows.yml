@@ -41,16 +41,7 @@ jobs:
           if (!(Test-Path "GTAO_active.ico")) { Write-Host "GTAO_active.ico not found"; exit 1 }
 
       - name: Build EXE with PyInstaller
-        run: |
-          python -m PyInstaller ^
-            --onefile ^
-            --name "Solo_Public_Lobby_V-Online" ^
-            --uac-admin ^
-            --windowed ^
-            --icon="GTAO.ico" ^
-            --add-data "GTAO_active.ico;." ^
-            --clean ^
-            create_rule_admin_gui_simple.py
+        run: python -m PyInstaller --onefile --name "Solo_Public_Lobby_V-Online" --uac-admin --windowed --icon="GTAO.ico" --add-data "GTAO_active.ico;." --clean create_rule_admin_gui_simple.py
             
       - name: Upload artifact
         uses: actions/upload-artifact@v4
