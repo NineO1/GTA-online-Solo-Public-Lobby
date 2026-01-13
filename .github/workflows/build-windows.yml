@@ -27,8 +27,6 @@ jobs:
           python --version
           echo "Pip version:"
           pip --version
-          which python
-          which pip
 
       - name: Clear PIP Cache
         run: python -m pip cache purge
@@ -45,14 +43,6 @@ jobs:
           venv\Scripts\python -m pip install --upgrade pip
           venv\Scripts\python -m pip install pyinstaller==6.18.0
           venv\Scripts\python -m pyinstaller --version
-
-      - name: List Installed Packages
-        run: venv\\Scripts\\python -m pip list
-
-      - name: Download Icons
-        run: |
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO.ico" -OutFile "GTAO.ico"
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
 
       - name: Ensure Icons Exist
         run: |
