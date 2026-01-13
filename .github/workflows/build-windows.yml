@@ -13,7 +13,7 @@ jobs:
     name: Build Windows onefile EXE
     runs-on: windows-latest
     steps:
-      - name: Checkout
+            - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -28,8 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller
-          # Verify installation
-          python -m pyinstaller --version
+          python -m pyinstaller --version  # Verify PyInstaller installation
 
       - name: Download icons
         run: |
@@ -46,13 +45,6 @@ jobs:
             Write-Host "GTAO_active.ico not found"
             exit 1
           }
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyinstaller
-          # Verify installation
-          python -m pyinstaller --version
 
       - name: Build with PyInstaller
         run: |
@@ -71,22 +63,3 @@ jobs:
         with:
           name: Solo_Public_Lobby_V-Online-windows-exe
           path: dist/Solo_Public_Lobby_V-Online.exe
-
-  release-upload:
-    name: Upload to release (on release created)
-    runs-on: windows-latest
-    needs: build-windows
-    if: github.event_name == 'release'
-    steps:
-      - name: Download artifact from previous job
-        uses: actions/download-artifact@v4
-        with:
-          name: Solo_Public_Lobby_V-Online-windows-exe
-          path: ./artifact
-
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ./artifact/Solo_Public_Lobby_V-Online.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
