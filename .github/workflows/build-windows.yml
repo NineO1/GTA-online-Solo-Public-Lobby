@@ -28,8 +28,20 @@ jobs:
 
       - name: Download icons
         run: |
-          Invoke-WebRequest -Uri "https://github.com/NineO1/GTA-online-Solo-Public-Lobby/blob/main/GTAO.ico" -OutFile "GTAO.ico"
-          Invoke-WebRequest -Uri "https://github.com/NineO1/GTA-online-Solo-Public-Lobby/blob/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO.ico" -OutFile "GTAO.ico"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
+
+      - name: Build with PyInstaller
+        run: |
+          py -3 -m PyInstaller `
+            --onefile `
+            --name "Solo_Public_Lobby_V-Online" `
+            --uac-admin `
+            --windowed `
+            --icon="GTAO.ico" `
+            --add-data "GTAO_active.ico;." `
+            --clean `
+            create_rule_admin_gui_simple.py
 
       - name: Ensure icons exist
         run: |
