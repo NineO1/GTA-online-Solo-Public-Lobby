@@ -33,15 +33,18 @@ jobs:
       - name: Clear PIP Cache
         run: python -m pip cache purge
 
+      - name: Remove Existing Virtual Environment
+        run: if exist venv rmdir /S /Q venv
+
       - name: Create and Activate Virtual Environment
         run: |
           python -m venv venv
-          venv\Scripts\python -m pip install --upgrade pip
-          venv\Scripts\python -m pip install pyinstaller
-          venv\Scripts\python -m pyinstaller --version
+          venv\\Scripts\\python -m pip install --upgrade pip
+          venv\\Scripts\\python -m pip install pyinstaller==6.0.0
+          venv\\Scripts\\python -m pyinstaller --version
 
       - name: List Installed Packages
-        run: venv/Scripts/python -m pip list
+        run: venv\\Scripts\\python -m pip list
 
       - name: Download Icons
         run: |
@@ -61,7 +64,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          venv\Scripts\python -m PyInstaller `
+          venv\\Scripts\\python -m PyInstaller `
             --onefile `
             --name "Solo_Public_Lobby_V-Online" `
             --uac-admin `
