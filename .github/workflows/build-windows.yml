@@ -21,50 +21,20 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Verify Python Installation
+      - name: Verify Python and Pip
         run: |
-          python --version
+          which python
+          which pip
 
-      - name: Check Pip and Python Paths
+      - name: Install Dependencies
         run: |
-          which python  # Verifies the Python executable being used
-          which pip     # Checks the pip location
-
-      - name: Install Python Dependencies
-        run: |
+          python -m ensurepip --upgrade
           python -m pip install --upgrade pip
           python -m pip install pyinstaller
           python -m pyinstaller --version  # Verify PyInstaller installation
 
       - name: List Installed Packages
-        run: |
-          python -m pip list
-
-      - name: Check Python Path
-        run: |
-          echo $PYTHONPATH
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyinstaller
-          python -m pyinstaller --version  # Verify PyInstaller installation
-
-      - name: Download icons
-        run: |
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO.ico" -OutFile "GTAO.ico"
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NineO1/GTA-online-Solo-Public-Lobby/main/GTAO_active.ico" -OutFile "GTAO_active.ico"
-
-      - name: Ensure icons exist
-        run: |
-          if (!(Test-Path "GTAO.ico")) {
-            Write-Host "GTAO.ico not found"
-            exit 1
-          }
-          if (!(Test-Path "GTAO_active.ico")) {
-            Write-Host "GTAO_active.ico not found"
-            exit 1
-          }
+        run: python -m pip list
 
       - name: Build with PyInstaller
         run: |
