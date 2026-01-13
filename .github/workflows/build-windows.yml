@@ -67,7 +67,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          venv\\Scripts\\python -m PyInstaller `
+          venv\Scripts\python -m PyInstaller `
             --onefile `
             --name "Solo_Public_Lobby_V-Online" `
             --uac-admin `
