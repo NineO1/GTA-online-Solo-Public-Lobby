@@ -28,8 +28,14 @@ jobs:
 
       - name: Ensure icons exist
         run: |
-          if not exist GTAO.ico ( echo "GTAO.ico not found" & exit 1 )
-          if not exist GTAO_active.ico ( echo "GTAO_active.ico not found" & exit 1 )
+          if (!(Test-Path "GTAO.ico")) {
+            Write-Host "GTAO.ico not found"
+            exit 1
+            }
+          if (!(Test-Path "GTAO_active.ico")) {
+            Write-Host "GTAO_active.ico not found"
+            exit 1
+            }
 
       - name: Build with PyInstaller
         run: |
