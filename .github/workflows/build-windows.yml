@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller==6.18.0
-          python -m pyinstaller --version
+          python -m PyInstaller --version
 
       - name: Ensure Icons Exist
         shell: pwsh
@@ -51,7 +51,7 @@ jobs:
             --add-data "GTAO_active.ico;." ^
             --clean ^
             create_rule_admin_gui_simple.py
-
+            
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
