@@ -54,16 +54,23 @@ jobs:
             exit 1
             }
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          # Verify installation
+          python -m pyinstaller --version
+
       - name: Build with PyInstaller
         run: |
-          py -3 -m PyInstaller ^
-            --onefile ^
-            --name "Solo_Public_Lobby_V-Online" ^
-            --uac-admin ^
-            --windowed ^
-            --icon="GTAO.ico" ^
-            --add-data "GTAO_active.ico;." ^
-            --clean ^
+          python -m PyInstaller `
+            --onefile `
+            --name "Solo_Public_Lobby_V-Online" `
+            --uac-admin `
+            --windowed `
+            --icon="GTAO.ico" `
+            --add-data "GTAO_active.ico;." `
+            --clean `
             create_rule_admin_gui_simple.py
 
       - name: Upload artifact
