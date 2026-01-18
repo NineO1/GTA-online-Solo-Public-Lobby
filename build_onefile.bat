@@ -9,9 +9,10 @@ if exist "venv\Scripts\activate.bat" (
   call "venv\Scripts\activate.bat"
 )
 
-REM Ensure PyInstaller is installed
+REM Ensure PyInstaller is installed (pinned for Python 3.12)
 echo Installing/ensuring PyInstaller...
-pip install --upgrade pyinstaller >nul 2>&1
+pip install --upgrade pip >nul 2>&1
+pip install "pyinstaller==6.18.0" >nul 2>&1
 
 REM Check required icon files
 if not exist "GTAO.ico" (

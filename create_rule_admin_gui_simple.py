@@ -27,18 +27,16 @@ import stat
 import traceback as _traceback
 from ctypes import wintypes
 import atexit
-
+import webbrowser
 # Debug flag: set to True when debugging to avoid relaunching as admin
-# For normal usage keep False so the app requests UAC and runs elevated.
 NO_ELEV = False
 
 # ----------------- CONFIG -----------------
 RULE_NAME = "GTA Online Rule"
 REMOTE_PORTS = "6672,61455,61456,61457,61458"
 HOTKEYS_FILE = "hotkeys.json"
-VERSION = "1.0.0"
+VERSION = "1.1.1"
 
-# icons
 INACTIVE_ICON = "GTAO.ico"
 ACTIVE_ICON = "GTAO_active.ico"
 
@@ -51,16 +49,9 @@ TOGGLE_PS1 = "toggle_rule.ps1"
 
 # ----------------- small helpers -----------------
 def exe_dir() -> str:
-    """
-    Return a directory for config/log files:
-    - When running from a normal Python environment -> script folder
-    - When running a packaged onedir (dist/<name>/) -> exe folder (so files live next to exe)
-    - When running a onefile bundle (PyInstaller extracts to a temporary folder) -> %APPDATA%/SPL_GTAVO
-    """
     if getattr(sys, "frozen", False):
         exe_parent = os.path.dirname(sys.executable)
         tmpdir = tempfile.gettempdir()
-        # If running from a temporary extraction folder (onefile), use %APPDATA%\SPL_GTAVO
         if exe_parent.startswith(tmpdir):
             appdata = os.getenv("APPDATA") or os.path.expanduser("~")
             p = os.path.join(appdata, "SPL_GTAVO")
@@ -69,21 +60,10 @@ def exe_dir() -> str:
             except Exception:
                 pass
             return p
-        # Otherwise (onedir) keep files next to the exe
         return exe_parent
-    # not frozen: use source file directory
     return os.path.dirname(os.path.abspath(__file__))
 
-
 def resource_path(name: str) -> str:
-    """
-    Return a path to a resource file (icon, helper).
-
-    Resolution order:
-    1) If PyInstaller onefile extracted resources are available (sys._MEIPASS) and the file exists there,
-       return that path.
-    2) Otherwise return a file next to the script/exe using exe_dir().
-    """
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         p = os.path.join(meipass, name)
@@ -91,7 +71,7 @@ def resource_path(name: str) -> str:
             return p
     return os.path.join(exe_dir(), name)
 
-# --- Windows icon / AppID helpers (safe no-ops on non-Windows)
+# --- Windows icon / AppID helpers ---
 if sys.platform == "win32":
     _user32 = ctypes.windll.user32
     _shell32 = ctypes.windll.shell32
@@ -103,8 +83,6 @@ if sys.platform == "win32":
     LR_LOADFROMFILE = 0x00000010
 
     def set_taskbar_appid(appid: str):
-        """Set the current process AppUserModelID so Windows taskbar uses the app's icon/grouping.
-        Call this before creating the first Tk window."""
         try:
             _shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(appid))
             dbg(f"Set AppUserModelID: {appid}")
@@ -112,7 +90,6 @@ if sys.platform == "win32":
             dbg("Failed to set AppUserModelID")
 
     def _load_icon_from_file(path: str):
-        """Load an HICON from an .ico file using LoadImageW(LR_LOADFROMFILE)."""
         try:
             hicon = _user32.LoadImageW(0, ctypes.c_wchar_p(path), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
             if not hicon:
@@ -122,12 +99,10 @@ if sys.platform == "win32":
             return None
 
     def set_window_icon(tk_root: tk.Tk, ico_path: str) -> bool:
-        """Set the window icon (big & small) from an .ico file. Returns True on success."""
         try:
             if not os.path.exists(ico_path):
                 dbg(f"set_window_icon: icon not found: {ico_path}")
                 return False
-            # Tk fallback (many platforms)
             try:
                 tk_root.iconbitmap(ico_path)
             except Exception:
@@ -151,7 +126,6 @@ if sys.platform == "win32":
 else:
     def set_taskbar_appid(appid: str):
         return
-
     def set_window_icon(tk_root: tk.Tk, ico_path: str) -> bool:
         try:
             tk_root.iconbitmap(ico_path)
@@ -187,7 +161,6 @@ def _ex_hook(exc_type, exc, tb):
 
 sys.excepthook = _ex_hook
 
-# thread-level exception hook (Python 3.8+)
 def _thread_ex_hook(args):
     try:
         with open(DEBUG_LOG, "a", encoding="utf-8") as f:
@@ -202,7 +175,6 @@ try:
 except Exception:
     dbg("threading.excepthook not available")
 
-# atexit marker
 def _at_exit():
     try:
         dbg("atexit: process exiting normally")
@@ -217,7 +189,6 @@ MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 
-# Hotkey action IDs (stable)
 ACTION_IDS = {
     "create": 1,
     "toggle": 2,
@@ -225,7 +196,6 @@ ACTION_IDS = {
     "suspend_enh": 4
 }
 
-# Default bindings
 DEFAULT_HOTKEYS = {
     "create": "Ctrl+Alt+C",
     "toggle": "Ctrl+Alt+T",
@@ -239,8 +209,6 @@ WM_USER = 0x0400
 WAKE_MSG = WM_USER + 100
 RECORDING_PAUSE_HOTKEYS = threading.Event()
 
-# Set function prototypes to help ctypes marshal arguments correctly (best-effort).
-# Wrapped in try/except so this file is still importable on exotic environments.
 try:
     user32.GetMessageW.restype = ctypes.c_int
     user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_uint, ctypes.c_uint]
@@ -275,16 +243,480 @@ NAMED_VK = {
 }
 
 # ----------------- embedded helper files -----------------
-# (unchanged, not truncated here for brevity; keep your existing EMBEDDED_FILES dict content)
+# ----------------- embedded helper files -----------------
 EMBEDDED_FILES = {
-    # ... existing embedded scripts ...
+    "suspend_resume_GTA5_Enhanced.ps1": r'''
+# suspend_resume_GTA5_Enhanced.ps1
+param(
+    [int]$TimeoutSeconds = 15,
+    [string]$ProcessBaseName = "GTA5_Enhanced"
+)
+Write-Host "Target process base name: $ProcessBaseName"
+Write-Host "Timeout (seconds): $TimeoutSeconds"
+Write-Host ""
+
+$signature = @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeMethods {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern IntPtr OpenProcess(UInt32 dwDesiredAccess, bool bInheritHandle, UInt32 dwProcessId);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtSuspendProcess(IntPtr ProcessHandle);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtResumeProcess(IntPtr ProcessHandle);
+}
+"@
+
+Add-Type -TypeDefinition $signature -ErrorAction Stop | Out-Null
+
+$PROCESS_ALL_ACCESS = 0x001F0FFF
+
+function Suspend-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtSuspendProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtSuspendProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
 }
 
+function Resume-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtResumeProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtResumeProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
+}
+
+$procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -ieq $ProcessBaseName }
+if (-not $procs) {
+    Write-Host "No process found with name '$ProcessBaseName'." -ForegroundColor Yellow
+    Write-Host "Check Task Manager → Details → Image (example: GTA5.exe -> process name = GTA5_Enhanced)"
+    exit 2
+}
+
+Write-Host "Found process(es):"
+$procs | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+Write-Host ""
+
+$allSuspended = $true
+foreach ($p in $procs) {
+    Write-Host "Suspending PID $($p.Id) ..."
+    if (-not (Suspend-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to suspend PID $($p.Id)" -ForegroundColor Red
+        $allSuspended = $false
+    } else {
+        Write-Host "Suspended PID $($p.Id)"
+    }
+}
+
+if (-not $allSuspended) {
+    Write-Host "Some processes failed to suspend. Will still attempt resume after timeout." -ForegroundColor Yellow
+}
+
+Write-Host "Sleeping $TimeoutSeconds second(s)..."
+Start-Sleep -Seconds $TimeoutSeconds
+
+foreach ($p in $procs) {
+    Write-Host "Resuming PID $($p.Id) ..."
+    if (-not (Resume-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to resume PID $($p.Id)" -ForegroundColor Red
+    } else {
+        Write-Host "Resumed PID $($p.Id)"
+    }
+}
+
+Write-Host ""
+Write-Host "Final state (if process still exists):"
+Get-Process -Id ($procs | Select-Object -ExpandProperty Id) -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, Responding -AutoSize
+
+exit 0
+''',
+
+    "suspend_resume_GTA5.ps1": r'''
+# suspend_resume_GTA5.ps1
+param(
+    [int]$TimeoutSeconds = 15,
+    [string]$ProcessBaseName = "GTA5"
+)
+Write-Host "Target process base name: $ProcessBaseName"
+Write-Host "Timeout (seconds): $TimeoutSeconds"
+Write-Host ""
+
+$signature = @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeMethods {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern IntPtr OpenProcess(UInt32 dwDesiredAccess, bool bInheritHandle, UInt32 dwProcessId);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtSuspendProcess(IntPtr ProcessHandle);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtResumeProcess(IntPtr ProcessHandle);
+}
+"@
+
+Add-Type -TypeDefinition $signature -ErrorAction Stop | Out-Null
+
+$PROCESS_ALL_ACCESS = 0x001F0FFF
+
+function Suspend-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtSuspendProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtSuspendProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
+}
+
+function Resume-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtResumeProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtResumeProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
+}
+
+$procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -ieq $ProcessBaseName }
+if (-not $procs) {
+    Write-Host "No process found with name '$ProcessBaseName'." -ForegroundColor Yellow
+    Write-Host "Check Task Manager → Details → Image (example: GTA5.exe -> process name = GTA5)"
+    exit 2
+}
+
+Write-Host "Found process(es):"
+$procs | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+Write-Host ""
+
+$allSuspended = $true
+foreach ($p in $procs) {
+    Write-Host "Suspending PID $($p.Id) ..."
+    if (-not (Suspend-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to suspend PID $($p.Id)" -ForegroundColor Red
+        $allSuspended = $false
+    } else {
+        Write-Host "Suspended PID $($p.Id)"
+    }
+}
+
+if (-not $allSuspended) {
+    Write-Host "Some processes failed to suspend. Will still attempt resume after timeout." -ForegroundColor Yellow
+}
+
+Write-Host "Sleeping $TimeoutSeconds second(s)..."
+Start-Sleep -Seconds $TimeoutSeconds
+
+foreach ($p in $procs) {
+    Write-Host "Resuming PID $($p.Id) ..."
+    if (-not (Resume-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to resume PID $($p.Id)" -ForegroundColor Red
+    } else {
+        Write-Host "Resumed PID $($p.Id)"
+    }
+}
+
+Write-Host ""
+Write-Host "Final state (if process still exists):"
+Get-Process -Id ($procs | Select-Object -ExpandProperty Id) -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, Responding -AutoSize
+
+exit 0
+''',
+
+    "suspend_resume_generic.ps1": r'''
+# suspend_resume_generic.ps1
+param(
+    [int]$TimeoutSeconds = 15,
+    [string]$ProcessBaseName = "GTA5_Enhanced"
+)
+Write-Host "Target process base name: $ProcessBaseName"
+Write-Host "Timeout (seconds): $TimeoutSeconds"
+Write-Host ""
+
+$signature = @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeMethods {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern IntPtr OpenProcess(UInt32 dwDesiredAccess, bool bInheritHandle, UInt32 dwProcessId);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtSuspendProcess(IntPtr ProcessHandle);
+    [DllImport("ntdll.dll", SetLastError=false)]
+    public static extern int NtResumeProcess(IntPtr ProcessHandle);
+}
+"@
+
+Add-Type -TypeDefinition $signature -ErrorAction Stop | Out-Null
+
+$PROCESS_ALL_ACCESS = 0x001F0FFF
+
+function Suspend-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtSuspendProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtSuspendProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
+}
+
+function Resume-ByPID {
+    param([uint32]$targetPid)
+    $h = [NativeMethods]::OpenProcess($PROCESS_ALL_ACCESS, $false, $targetPid)
+    if ($h -eq [IntPtr]::Zero) {
+        Write-Host "OpenProcess failed for PID $targetPid. Win32 Error:" ([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()) -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $res = [NativeMethods]::NtResumeProcess($h)
+        if ($res -ne 0) {
+            Write-Host "NtResumeProcess returned $res for PID $targetPid" -ForegroundColor Yellow
+            return $false
+        }
+        return $true
+    } finally {
+        [NativeMethods]::CloseHandle($h) | Out-Null
+    }
+}
+
+$procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -ieq $ProcessBaseName }
+if (-not $procs) {
+    Write-Host "No process found with name '$ProcessBaseName'." -ForegroundColor Yellow
+    Write-Host "Check Task Manager → Details → Image (example: GTA5.exe -> process name = GTA5)"
+    exit 2
+}
+
+Write-Host "Found process(es):"
+$procs | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+Write-Host ""
+
+$allSuspended = $true
+foreach ($p in $procs) {
+    Write-Host "Suspending PID $($p.Id) ..."
+    if (-not (Suspend-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to suspend PID $($p.Id)" -ForegroundColor Red
+        $allSuspended = $false
+    } else {
+        Write-Host "Suspended PID $($p.Id)"
+    }
+}
+
+if (-not $allSuspended) {
+    Write-Host "Some processes failed to suspend. Will still attempt resume after timeout." -ForegroundColor Yellow
+}
+
+Write-Host "Sleeping $TimeoutSeconds second(s)..."
+Start-Sleep -Seconds $TimeoutSeconds
+
+foreach ($p in $procs) {
+    Write-Host "Resuming PID $($p.Id) ..."
+    if (-not (Resume-ByPID -targetPid $p.Id)) {
+        Write-Host "Failed to resume PID $($p.Id)" -ForegroundColor Red
+    } else {
+        Write-Host "Resumed PID $($p.Id)"
+    }
+}
+
+Write-Host ""
+Write-Host "Final state (if process still exists):"
+Get-Process -Id ($procs | Select-Object -ExpandProperty Id) -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, Responding -AutoSize
+
+exit 0
+''',
+
+    "suspend_resume_GTA5.bat": r'''@echo off
+rem suspend_resume_GTA5.bat
+rem Usage: double-click or pass timeout (seconds): suspend_resume_GTA5.bat 10
+setlocal
+set "PSCRIPT=%~dp0suspend_resume_generic.ps1"
+set "TIMEOUT=%~1"
+set "PROCESSNAME=GTA5"
+
+if not exist "%PSCRIPT%" (
+  echo Error: "%PSCRIPT%" not found.
+  pause
+  exit /b 1
+)
+
+rem Elevation check
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+  echo Requesting administrative privileges...
+  powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath '%~f0' -ArgumentList '%TIMEOUT%' -Verb RunAs"
+  exit /b
+)
+
+if "%TIMEOUT%"=="" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PSCRIPT%" "%PROCESSNAME%"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PSCRIPT%" "%TIMEOUT%" "%PROCESSNAME%"
+)
+
+endlocal
+exit /b %ERRORLEVEL%
+''',
+
+    "suspend_resume_GTA5_Enhanced.bat": r'''@echo off
+rem suspend_resume_GTA5_Enhanced.bat
+setlocal
+set "PSCRIPT=%~dp0suspend_resume_GTA5_Enhanced.ps1"
+set "TIMEOUT=%~1"
+
+if not exist "%PSCRIPT%" (
+  echo Error: "%PSCRIPT%" not found.
+  pause
+  exit /b 1
+)
+
+rem --- Elevation check
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+  echo Requesting administrative privileges...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','\"%~f0\" %*' -Verb RunAs"
+  exit /b
+)
+
+if "%TIMEOUT%"=="" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PSCRIPT%"
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%PSCRIPT%" "%TIMEOUT%"
+)
+
+set rc=%ERRORLEVEL%
+if %rc% NEQ 0 (
+  echo.
+  echo ERROR: script exited with code %rc%.
+) else (
+  echo.
+  echo Done.
+)
+pause
+endlocal
+exit /b %rc%
+''',
+
+    "toggle_rule.ps1": r'''# toggle_rule.ps1
+param(
+    [string]$DisplayName = 'GTA Online Rule'
+)
+try {
+    $rules = Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction Stop
+} catch {
+    Write-Host "Rule '$DisplayName' not found (Get-NetFirewallRule failed)." -ForegroundColor Yellow
+    exit 1
+}
+if (-not $rules) {
+    Write-Host "Rule '$DisplayName' not found." -ForegroundColor Yellow
+    exit 1
+}
+foreach ($r in $rules) {
+    $isEnabled = $false
+    if ($r.Enabled -is [bool]) { $isEnabled = $r.Enabled } else { $isEnabled = ($r.Enabled -eq 'True') }
+    if ($isEnabled) {
+        Write-Host "Disabling rule: $($r.DisplayName) (Name: $($r.Name))"
+        Disable-NetFirewallRule -Name $r.Name -ErrorAction Stop
+        Write-Host "Disabled."
+    } else {
+        Write-Host "Enabling rule: $($r.DisplayName) (Name: $($r.Name))"
+        Enable-NetFirewallRule -Name $r.Name -ErrorAction Stop
+        Write-Host "Enabled."
+    }
+}
+Write-Host ""
+Get-NetFirewallRule -DisplayName $DisplayName | Format-Table DisplayName, Name, Enabled, Direction, Action -AutoSize
+exit 0
+''',
+
+    "toggle_rule.bat": r'''@echo off
+rem toggle_rule.bat - launcher for toggle_rule.ps1
+setlocal
+set "SCRIPT=%~dp0toggle_rule.ps1"
+if not exist "%SCRIPT%" (
+    echo Error: "%SCRIPT%" not found.
+    pause
+    exit /b 1
+)
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+    echo Requesting administrative privileges...
+    powershell -NoProfile -WindowStyle Hidden -Command ^
+      "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%"
+set rc=%ERRORLEVEL%
+echo.
+if %rc% NEQ 0 (
+    echo ERROR: toggle script exited with code %rc%.
+) else (
+    echo Done.
+)
+pause
+endlocal
+exit /b %rc%
+'''
+}
+# (For brevity in this snippet, the bodies are identical to the patch shown earlier—keep the full text from that patch.)
+
 def ensure_embedded_file(name: str) -> str:
-    """
-    Ensure the helper file exists next to exe or write it to %TEMP%\SPL_GTAVO.
-    Returns the path to the helper file.
-    """
     base = exe_dir()
     path_next = os.path.join(base, name)
     if os.path.exists(path_next):
@@ -304,18 +736,14 @@ def ensure_embedded_file(name: str) -> str:
     return path
 
 def launch_bat(bat_or_name: str):
-    """
-    Launch a .bat file. Accepts either an absolute path or one of the embedded names
-    (it will ensure the embedded file and any dependent PS1 helpers exist and return its path).
-    """
     # If absolute path given, just run it
     if os.path.isabs(bat_or_name) and os.path.exists(bat_or_name):
         path = bat_or_name
     else:
-        # Ensure the requested embedded file exists (writes to %TEMP%\SPL_GTAVO)
-        path = ensure_embedded_file(bat_or_name)
-
-        # If this is one of the BATs that expects a PS1 next to it, ensure the PS1 is also written.
+        try:
+            path = ensure_embedded_file(bat_or_name)
+        except FileNotFoundError:
+            return False, f"Embedded file not found: {bat_or_name}"
         try:
             if bat_or_name == SUSPEND_ENH_BAT:
                 ensure_embedded_file("suspend_resume_GTA5_Enhanced.ps1")
@@ -331,6 +759,319 @@ def launch_bat(bat_or_name: str):
         return True, "Launched"
     except Exception as e:
         return False, str(e)
+    
+
+# ----------------- capture hotkey (by-press) -----------------
+GetAsyncKeyState = user32.GetAsyncKeyState
+VK_MIN = 1
+VK_MAX = 254
+
+def capture_hotkey_dialog(parent, timeout=12, entry_widget=None) -> list | None:
+    top = tk.Toplevel(parent)
+    top.title("Capture hotkey")
+    top.geometry("+300+300")
+    top.grab_set()
+    tk.Label(top, text="Hold modifiers, press a key, then release to save that combo.\nRepeat to add more. Press Reset in the Hotkeys dialog to clear.").pack(padx=12, pady=(10,6))
+    info = tk.StringVar(value="Waiting...")
+    lbl = tk.Label(top, textvariable=info, fg="blue")
+    lbl.pack(padx=12, pady=(0,8))
+    btn_frame = tk.Frame(top)
+    btn_frame.pack(pady=(0,10))
+
+    captures: list[str] = []
+    state = {"last_non_mod_vk": None, "last_mods": 0, "done": False, "pressed_non_mod": False}
+
+    def close_and_return():
+        state["done"] = True
+        top.destroy()
+
+    ttk.Button(btn_frame, text="Save", command=close_and_return).pack(side="left", padx=6)
+    ttk.Button(btn_frame, text="Cancel", command=close_and_return).pack(side="left", padx=6)
+
+    start = time.time()
+    prev_non_mod = set()
+
+    def commit_capture(vk, mods):
+        hk = hotkey_to_string(mods, vk)
+        if not captures or captures[-1] != hk:
+            captures.append(hk)
+            if entry_widget is not None:
+                entry_widget.delete(0, tk.END)
+                entry_widget.insert(0, ", ".join(captures))
+            info.set(f"Saved: {hk}")
+
+    def poll():
+        if state["done"]:
+            return
+        if time.time() - start > timeout:
+            state["done"] = True
+            top.destroy()
+            return
+        mods = 0
+        if GetAsyncKeyState(0x11) & 0x8000: mods |= MOD_CONTROL
+        if GetAsyncKeyState(0x12) & 0x8000: mods |= MOD_ALT
+        if GetAsyncKeyState(0x10) & 0x8000: mods |= MOD_SHIFT
+        if GetAsyncKeyState(0x5B) & 0x8000 or GetAsyncKeyState(0x5C) & 0x8000: mods |= MOD_WIN
+
+        current_non_mod = set()
+        for vk in range(VK_MIN, VK_MAX + 1):
+            if vk in (0x11,0x12,0x10,0x5B,0x5C): continue
+            if GetAsyncKeyState(vk) & 0x8000:
+                current_non_mod.add(vk)
+
+        if current_non_mod and not prev_non_mod:
+            vk = next(iter(current_non_mod))
+            state["last_non_mod_vk"] = vk
+            state["last_mods"] = mods
+            state["pressed_non_mod"] = True
+            info.set(f"Captured: {hotkey_to_string(mods, vk)}")
+        elif not current_non_mod and prev_non_mod:
+            if state.get("pressed_non_mod") and state.get("last_non_mod_vk"):
+                commit_capture(state["last_non_mod_vk"], state["last_mods"])
+            state["pressed_non_mod"] = False
+            state["last_non_mod_vk"] = None
+
+        prev_non_mod.clear(); prev_non_mod.update(current_non_mod)
+        top.after(50, poll)
+
+    top.bind("<Return>", lambda e: close_and_return())
+    top.bind("<Escape>", lambda e: close_and_return())
+    top.after(50, poll)
+    parent.wait_window(top)
+    return captures if captures else None
+
+# ----------------- Hotkeys dialog -----------------
+class HotkeysDialog:
+    def __init__(self, parent, current_map):
+        self.top = tk.Toplevel(parent)
+        self.top.title("Hotkeys")
+        self.top.grab_set()
+        self.result = None
+
+        frm = ttk.Frame(self.top, padding=10)
+        frm.grid()
+
+        ttk.Label(
+            frm,
+            text="Type hotkeys (e.g. Ctrl+Alt+E) or press Record and press keys to save them.\n"
+                 "Recording saves on key release (one-shot) and closes automatically."
+        ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0,6))
+
+        self._temp_msg = tk.StringVar(value="")
+        ttk.Label(frm, textvariable=self._temp_msg, foreground="orange").grid(row=1, column=0, columnspan=4, sticky="w", pady=(6,0))
+
+        self.entries = {}
+        self.recording = {}
+        row = 2
+
+        try:
+            RECORDING_PAUSE_HOTKEYS.set()
+            dbg("HotkeysDialog: set RECORDING_PAUSE_HOTKEYS on open")
+        except Exception:
+            pass
+
+        for action in ("create", "toggle", "delete", "suspend_enh"):
+            label = {"create":"Create","toggle":"Toggle","delete":"Delete","suspend_enh":"Suspend Enhanced"}[action]
+            ttk.Label(frm, text=label + ":").grid(row=row, column=0, sticky="e", padx=(0,6))
+            e = ttk.Entry(frm, width=44)
+            e.grid(row=row, column=1, sticky="w")
+            e.insert(0, current_map.get(action, DEFAULT_HOTKEYS[action]))
+            e.bind("<Button-3>", lambda ev, a=action: self._entry_context_menu(a, ev))
+            self.entries[action] = e
+
+            rb = ttk.Button(frm, text="Record", width=12, command=lambda a=action: self._toggle_record(a))
+            rb.grid(row=row, column=2, padx=(6,0))
+            ttk.Button(frm, text="Reset", width=6, command=lambda a=action: self.reset(a)).grid(row=row, column=3, padx=(6,0))
+            row += 1
+
+        btns = ttk.Frame(frm); btns.grid(row=row, column=0, columnspan=4, pady=(8,0))
+        ttk.Button(btns, text="Save", command=self.on_save).grid(column=0, row=0, padx=4)
+        ttk.Button(btns, text="Cancel", command=self.on_cancel).grid(column=1, row=0, padx=4)
+        self.top.bind("<Return>", lambda e: self.on_save())
+        self.top.bind("<Escape>", lambda e: self.on_cancel())
+
+    def _show_temp_message(self, txt: str, ttl: float = 2.5):
+        try:
+            self._temp_msg.set(txt)
+            self.top.after(int(ttl * 1000), lambda: self._temp_msg.set(""))
+        except Exception:
+            pass
+
+    def _entry_context_menu(self, action, event):
+        entry = self.entries[action]
+        parts = [p.strip() for p in entry.get().split(",") if p.strip()]
+        if not parts:
+            return
+        m = tk.Menu(self.top, tearoff=0)
+        submenu = tk.Menu(m, tearoff=0)
+        for i, p in enumerate(parts):
+            submenu.add_command(label=f"Remove: {p}", command=lambda idx=i, a=action: self._remove_combo(a, idx))
+        m.add_cascade(label="Remove combo...", menu=submenu)
+        m.add_separator()
+        m.add_command(label="Remove all", command=lambda a=action: self._remove_all(a))
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    def _remove_combo(self, action, index):
+        entry = self.entries[action]
+        parts = [p.strip() for p in entry.get().split(",") if p.strip()]
+        if 0 <= index < len(parts):
+            parts.pop(index)
+            entry.delete(0, tk.END)
+            entry.insert(0, ", ".join(parts))
+            self._persist_immediately()
+            self._show_temp_message("Removed combo")
+
+    def _remove_all(self, action):
+        entry = self.entries[action]
+        entry.delete(0, tk.END)
+        self._persist_immediately()
+        self._show_temp_message("Removed all combos")
+
+    def reset(self, action):
+        if self.recording.get(action):
+            self._stop_record(action)
+        self.entries[action].delete(0, tk.END)
+        self.entries[action].insert(0, DEFAULT_HOTKEYS[action])
+        self._persist_immediately()
+
+    def _toggle_record(self, action):
+        if self.recording.get(action):
+            self._stop_record(action)
+        else:
+            for a in list(self.recording.keys()):
+                if self.recording.get(a):
+                    self._stop_record(a)
+            self._start_record(action)
+
+    def _start_record(self, action):
+        self.recording[action] = True
+        try:
+            self.entries[action].delete(0, tk.END)
+        except Exception:
+            pass
+        state = {"captures": [], "last_non_mod_vk": None, "last_mods": 0, "pressed_non_mod": False, "prev_non_mod": set(), "start": time.time()}
+        self._record_state = getattr(self, "_record_state", {})
+        self._record_state[action] = state
+        self._record_poll(action)
+
+    def _stop_record(self, action):
+        self.recording[action] = False
+        try:
+            del self._record_state[action]
+        except Exception:
+            pass
+        if not any(self.recording.get(a) for a in self.recording):
+            try:
+                RECORDING_PAUSE_HOTKEYS.clear()
+            except Exception:
+                pass
+        self._persist_immediately()
+
+    def _commit_capture(self, action, hk):
+        state = getattr(self, "_record_state", {}).get(action, {"captures": []})
+        if not state["captures"] or state["captures"][-1] != hk:
+            state["captures"].append(hk)
+            self._record_state[action] = state
+            try:
+                entry = self.entries[action]
+                entry.delete(0, tk.END)
+                entry.insert(0, ", ".join(state["captures"]))
+            except Exception:
+                pass
+            self._persist_immediately()
+            self._show_temp_message(f"Saved {hk}")
+            self.top.after(300, lambda: self._stop_record(action))
+
+    def _persist_immediately(self):
+        try:
+            mapping = {}
+            for a, e in self.entries.items():
+                mapping[a] = e.get().strip()
+            save_hotkeys(mapping)
+        except Exception:
+            pass
+
+    def _record_poll(self, action):
+        if not self.recording.get(action):
+            return
+        state = getattr(self, "_record_state", {}).get(action)
+        if state is None:
+            return
+        if time.time() - state["start"] > 300:
+            self._stop_record(action)
+            return
+        mods = 0
+        if GetAsyncKeyState(0x11) & 0x8000: mods |= MOD_CONTROL
+        if GetAsyncKeyState(0x12) & 0x8000: mods |= MOD_ALT
+        if GetAsyncKeyState(0x10) & 0x8000: mods |= MOD_SHIFT
+        if GetAsyncKeyState(0x5B) & 0x8000 or GetAsyncKeyState(0x5C) & 0x8000: mods |= MOD_WIN
+
+        EXCLUDE_VKS = {0x11,0x12,0x10,0x5B,0x5C,0xA0,0xA1,0xA2,0xA3,0xA4,0xA5}
+        current_non_mod = {vk for vk in range(VK_MIN, VK_MAX+1) if vk not in EXCLUDE_VKS and (GetAsyncKeyState(vk) & 0x8000)}
+        prev_non_mod = state["prev_non_mod"]
+
+        if current_non_mod and not prev_non_mod:
+            vk = next(iter(current_non_mod))
+            state["last_non_mod_vk"] = vk
+            state["last_mods"] = mods
+            state["pressed_non_mod"] = True
+            try: self.top.title(f"Recording: {hotkey_to_string(mods, vk)}")
+            except Exception: pass
+        elif not current_non_mod and prev_non_mod:
+            if state.get("pressed_non_mod") and state.get("last_non_mod_vk"):
+                vk = state["last_non_mod_vk"]
+                self._commit_capture(action, hotkey_to_string(state["last_mods"], vk))
+            state["pressed_non_mod"] = False
+            state["last_non_mod_vk"] = None
+        else:
+            display = []
+            if mods & MOD_CONTROL: display.append("Ctrl")
+            if mods & MOD_ALT: display.append("Alt")
+            if mods & MOD_SHIFT: display.append("Shift")
+            if mods & MOD_WIN: display.append("Win")
+            try:
+                self.top.title("Recording — " + "+".join(display) if display else "Recording")
+            except Exception:
+                pass
+
+        prev_non_mod.clear(); prev_non_mod.update(current_non_mod)
+        self.top.after(50, lambda: self._record_poll(action))
+
+    def on_save(self):
+        for action in list(self.recording.keys()):
+            if self.recording.get(action):
+                self._stop_record(action)
+        try:
+            RECORDING_PAUSE_HOTKEYS.clear()
+        except Exception:
+            pass
+        new_map = {}
+        for action, entry in self.entries.items():
+            txt = entry.get().strip()
+            if not txt:
+                messagebox.showerror("Hotkeys", f"Empty hotkey for {action}")
+                return
+            parts = [p.strip() for p in txt.split(",") if p.strip()]
+            for p in parts:
+                parse_hotkey_string(p)
+            new_map[action] = txt
+        save_hotkeys(new_map)
+        self.result = new_map
+        self.top.destroy()
+
+    def on_cancel(self):
+        for action in list(self.recording.keys()):
+            if self.recording.get(action):
+                self._stop_record(action)
+        try:
+            RECORDING_PAUSE_HOTKEYS.clear()
+        except Exception:
+            pass
+        self._persist_immediately()
+        self.top.destroy()
 
 # ----------------- hotkey parsing and formatting -----------------
 def load_hotkeys() -> dict:
@@ -385,16 +1126,14 @@ def parse_hotkey_string(s: str):
     elif len(key) == 1:
         vk = ord(key.upper())
     else:
-        name = key.lower()
         named = {
             "space": 0x20, "tab": 0x09, "enter": 0x0D, "return": 0x0D,
             "esc": 0x1B, "escape": 0x1B, "up": 0x26, "down": 0x28,
             "left": 0x25, "right": 0x27, "ins": 0x2D, "del": 0x2E,
             "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
         }
-        if name in named:
-            vk = named[name]
-        else:
+        vk = named.get(key.lower())
+        if vk is None:
             raise ValueError(f"Unknown key name: {key}")
     return mods, vk
 
@@ -421,20 +1160,14 @@ def hotkey_to_string(mods: int, vk: int) -> str:
 
 # ----------------- hotkey thread -----------------
 def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", ready_event: threading.Event):
-    """
-    Dedicated thread that owns RegisterHotKey / UnregisterHotKey and runs GetMessage.
-    It processes registration commands from cmd_queue and emits ("hotkey", id) in event_queue.
-    """
     try:
         msg = wintypes.MSG()
         registered_ids = []
         PM_NOREMOVE = 0x0000
         try:
-            # create this thread's message queue (non-blocking)
             user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_NOREMOVE)
         except Exception:
             dbg("hotkey_thread: PeekMessageW failed during startup (non-fatal)")
-        # publish native thread id
         try:
             kernel32 = ctypes.windll.kernel32
             native_tid = kernel32.GetCurrentThreadId()
@@ -445,7 +1178,6 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
         ready_event.set()
 
         while True:
-            # process pending commands (registration/stop)
             while True:
                 try:
                     cmd = cmd_queue.get_nowait()
@@ -457,7 +1189,6 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
                 if cmd[0] == "register":
                     hotmap = cmd[1]
                     resp_q = cmd[2] if len(cmd) > 2 else None
-                    # unregister previous
                     for aid in registered_ids:
                         try:
                             user32.UnregisterHotKey(None, aid)
@@ -482,7 +1213,6 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
                             break
                         registered_ids.append(aid)
                     if failed:
-                        # rollback
                         for aid in registered_ids:
                             try:
                                 user32.UnregisterHotKey(None, aid)
@@ -495,7 +1225,6 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
                         if resp_q:
                             resp_q.put(("ok",))
                 elif cmd[0] == "stop":
-                    # unregister and respond
                     for aid in registered_ids:
                         try:
                             user32.UnregisterHotKey(None, aid)
@@ -504,7 +1233,6 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
                     registered_ids.clear()
                     if len(cmd) > 1 and isinstance(cmd[1], queue.Queue):
                         cmd[1].put(("stopped",))
-                    # post WM_QUIT to wake any GetMessageW
                     try:
                         tid = globals().get("HOTKEY_THREAD_NATIVE_ID") or threading.get_native_id()
                         user32.PostThreadMessageW(int(tid), 0x0012, 0, 0)
@@ -512,10 +1240,8 @@ def hotkey_thread_func(cmd_queue: "queue.Queue", event_queue: "queue.Queue", rea
                         pass
                     return
 
-            # block waiting for Windows messages
             res = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
             if res == 0:
-                # WM_QUIT received
                 break
             if res == -1:
                 try:
@@ -552,131 +1278,7 @@ GetAsyncKeyState = user32.GetAsyncKeyState
 VK_MIN = 1
 VK_MAX = 254
 
-def capture_hotkey_dialog(parent, timeout=12, entry_widget=None) -> list | None:
-    """
-    Record multiple captures during one recording session.
-
-    - Each time a non-modifier key is pressed and then released, the combo is saved.
-    - Saved combos are appended (comma-separated) to the provided entry_widget (if given).
-    - The dialog stays open until Save, Cancel or timeout. Save/Cancel both close the dialog;
-      already-saved combos are NOT reverted — use Reset to clear.
-    - Returns a list of captured combos (possibly empty) or None on immediate abort.
-    """
-    top = tk.Toplevel(parent)
-    top.title("Capture hotkey")
-    top.geometry("+300+300")
-    top.grab_set()
-    tk.Label(top, text="Hold modifiers, press a key, then release to save that combo.\nRepeat to add more. Press Reset in the Hotkeys dialog to clear.").pack(padx=12, pady=(10,6))
-    info = tk.StringVar(value="Waiting...")
-    lbl = tk.Label(top, textvariable=info, fg="blue")
-    lbl.pack(padx=12, pady=(0,8))
-    btn_frame = tk.Frame(top)
-    btn_frame.pack(pady=(0,10))
-
-    captures: list[str] = []
-    state = {
-        "last_non_mod_vk": None,
-        "last_mods": 0,
-        "done": False,
-        "pressed_non_mod": False
-    }
-
-    def close_and_return():
-        state["done"] = True
-        top.destroy()
-
-    def on_save():
-        close_and_return()
-
-    def on_cancel():
-        # Per your request, do not revert already-saved combos.
-        close_and_return()
-
-    ttk.Button(btn_frame, text="Save", command=on_save).pack(side="left", padx=6)
-    ttk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side="left", padx=6)
-
-    start = time.time()
-    prev_non_mod = set()
-
-    def commit_capture(vk, mods):
-        hk = hotkey_to_string(mods, vk)
-        if not captures or captures[-1] != hk:
-            captures.append(hk)
-            try:
-                if entry_widget is not None:
-                    # overwrite entry with comma-separated captures
-                    entry_widget.delete(0, tk.END)
-                    entry_widget.insert(0, ", ".join(captures))
-            except Exception:
-                pass
-            info.set(f"Saved: {hk}  (continue recording or press Save/Cancel)")
-            dbg(f"capture_hotkey_dialog: saved {hk}")
-
-    def poll():
-        if state["done"]:
-            return
-        elapsed = time.time() - start
-        if elapsed > timeout:
-            state["done"] = True
-            top.destroy()
-            return
-        mods = 0
-        if GetAsyncKeyState(0x11) & 0x8000:
-            mods |= MOD_CONTROL
-        if GetAsyncKeyState(0x12) & 0x8000:
-            mods |= MOD_ALT
-        if GetAsyncKeyState(0x10) & 0x8000:
-            mods |= MOD_SHIFT
-        if GetAsyncKeyState(0x5B) & 0x8000 or GetAsyncKeyState(0x5C) & 0x8000:
-            mods |= MOD_WIN
-
-        current_non_mod = set()
-        for vk in range(VK_MIN, VK_MAX + 1):
-            if vk in (0x11, 0x12, 0x10, 0x5B, 0x5C):
-                continue
-            if GetAsyncKeyState(vk) & 0x8000:
-                current_non_mod.add(vk)
-
-        # Detect press start
-        if current_non_mod and not prev_non_mod:
-            # first non-mod key pressed
-            vk = next(iter(current_non_mod))
-            state["last_non_mod_vk"] = vk
-            state["last_mods"] = mods
-            state["pressed_non_mod"] = True
-            info.set(f"Captured (press+release to save): {hotkey_to_string(mods, vk)}")
-        # Detect release -> commit the last captured key if any
-        elif not current_non_mod and prev_non_mod:
-            if state.get("pressed_non_mod") and state.get("last_non_mod_vk"):
-                commit_capture(state["last_non_mod_vk"], state["last_mods"])
-            state["pressed_non_mod"] = False
-            state["last_non_mod_vk"] = None
-        else:
-            # update modifiers-only display
-            display = []
-            if mods & MOD_CONTROL:
-                display.append("Ctrl")
-            if mods & MOD_ALT:
-                display.append("Alt")
-            if mods & MOD_SHIFT:
-                display.append("Shift")
-            if mods & MOD_WIN:
-                display.append("Win")
-            if display:
-                info.set("Modifiers: " + "+".join(display) + " — press and release a non-mod key to save")
-            else:
-                info.set("Waiting... (press Cancel to finish)")
-
-        # store current state for next poll
-        prev_non_mod.clear()
-        prev_non_mod.update(current_non_mod)
-        top.after(50, poll)
-
-    top.bind("<Return>", lambda e: on_save())
-    top.bind("<Escape>", lambda e: on_cancel())
-    top.after(50, poll)
-    parent.wait_window(top)
-    return captures if captures else None
+# (capture_hotkey_dialog remains unchanged; omitted for brevity)
 
 # ----------------- netsh helpers -----------------
 def run_cmd(args, timeout=15):
@@ -707,10 +1309,7 @@ def delete_rule():
 # ----------------- GUI -----------------
 class App:
     def __init__(self, root: tk.Tk):
-        # save the tkinter root
         self.root = root
-
-        # try to set initial icon (both Tk and Win32)
         try:
             set_window_icon(self.root, resource_path(INACTIVE_ICON))
         except Exception:
@@ -719,14 +1318,12 @@ class App:
         self.inactive_icon = resource_path(INACTIVE_ICON)
         self.active_icon = resource_path(ACTIVE_ICON) if os.path.exists(resource_path(ACTIVE_ICON)) else self.inactive_icon
 
-        # bind focus changes to toggle the icon (use Win32 setter when possible)
         try:
             self.root.bind("<FocusIn>", lambda e: set_window_icon(self.root, self.active_icon))
             self.root.bind("<FocusOut>", lambda e: set_window_icon(self.root, self.inactive_icon))
         except Exception:
             pass
 
-        # window title and sizing
         self.root.title("Solo Public Lobby V -Online")
         self.root.resizable(False, False)
 
@@ -754,7 +1351,6 @@ class App:
         ttk.Button(ctrl, text="Quit", command=self.quit).grid(column=1, row=0, padx=4)
         ttk.Button(ctrl, text="About", command=self.show_about).grid(column=2, row=0, padx=4)
 
-        # queues and hotkey thread
         self.event_q = queue.Queue()
         self.cmd_q = queue.Queue()
         self.hready = threading.Event()
@@ -764,11 +1360,9 @@ class App:
             messagebox.showwarning("Hotkeys", "Hotkey thread did not start correctly.")
             dbg("Hotkey thread did not signal ready within timeout")
 
-        # load hotkeys and register them
         self.hotkeys = load_hotkeys()
         self.register_all_hotkeys()
 
-        # start checking events and refresh UI
         self.root.after(100, self.check_queue)
         self.refresh()
 
@@ -787,10 +1381,8 @@ class App:
                 item = self.event_q.get_nowait()
                 dbg(f"check_queue: got item {item}")
                 if item[0] == "hotkey":
-                    # If a recorder is active, ignore global hotkeys so they don't affect the main window.
                     if RECORDING_PAUSE_HOTKEYS.is_set():
                         dbg(f"check_queue: hotkey {item[1]} ignored due to recording in progress")
-                        # drop the event
                         continue
                     try:
                         self.handle_hotkey(item[1])
@@ -811,36 +1403,33 @@ class App:
 
     def handle_hotkey(self, id_):
         dbg(f"handle_hotkey called with id={id_}")
-        try:
-            if id_ == ACTION_IDS["create"]:
-                try:
-                    self.create()
-                except Exception:
-                    log_exc("create")
-                    messagebox.showerror("Create", "Error while creating rule. See crash_log.txt")
-            elif id_ == ACTION_IDS["toggle"]:
-                try:
-                    self.toggle()
-                except Exception:
-                    log_exc("toggle")
-                    messagebox.showerror("Toggle", "Error while toggling rule. See crash_log.txt")
-            elif id_ == ACTION_IDS["delete"]:
-                try:
-                    if messagebox.askyesno("Confirm", "Delete the firewall rule?"):
-                        self.delete()
-                except Exception:
-                    log_exc("delete")
-                    messagebox.showerror("Delete", "Error while deleting rule. See crash_log.txt")
-            elif id_ == ACTION_IDS["suspend_enh"]:
-                try:
-                    self.suspend_enh()
-                except Exception:
-                    log_exc("suspend_enh")
-                    messagebox.showerror("Suspend", "Error while suspending. See crash_log.txt")
-            else:
-                dbg(f"handle_hotkey: unknown id {id_}")
-        except Exception:
-            raise
+        if id_ == ACTION_IDS["create"]:
+            try:
+                self.create()
+            except Exception:
+                log_exc("create")
+                messagebox.showerror("Create", "Error while creating rule. See crash_log.txt")
+        elif id_ == ACTION_IDS["toggle"]:
+            try:
+                self.toggle()
+            except Exception:
+                log_exc("toggle")
+                messagebox.showerror("Toggle", "Error while toggling rule. See crash_log.txt")
+        elif id_ == ACTION_IDS["delete"]:
+            try:
+                if messagebox.askyesno("Confirm", "Delete the firewall rule?"):
+                    self.delete()
+            except Exception:
+                log_exc("delete")
+                messagebox.showerror("Delete", "Error while deleting rule. See crash_log.txt")
+        elif id_ == ACTION_IDS["suspend_enh"]:
+            try:
+                self.suspend_enh()
+            except Exception:
+                log_exc("suspend_enh")
+                messagebox.showerror("Suspend", "Error while suspending. See crash_log.txt")
+        else:
+            dbg(f"handle_hotkey: unknown id {id_}")
 
     def refresh(self):
         rc, out, err = show_rule()
@@ -908,24 +1497,27 @@ class App:
             messagebox.showinfo("Suspend", "Suspend launched (check the script window).")
 
     def show_about(self):
-        """Show About dialog with version and diagnostic hints."""
-        try:
-            exe_location = exe_dir()
-            txt = (
-                f"Solo Public Lobby V -Online\n"
-                f"Version: {VERSION}\n\n"
-                "Notes:\n"
-                "- If you report a bug, please include debug_log.txt and crash_log.txt\n"
-                f"  (logs directory: {exe_location})\n"
-                "- If you built a onefile EXE, include whether you used the distributed EXE or ran from Python.\n\n"
-                "GitHub: https://github.com/NineO1/GTA-online-Solo-Public-Lobby.git"
-            )
-            messagebox.showinfo("About", txt)
-        except Exception:
-            try:
-                messagebox.showinfo("About", f"Solo Public Lobby V -Online\nVersion: {VERSION}")
-            except Exception:
-                pass
+        """About dialog with clickable GitHub link."""
+        url = "https://github.com/NineO1/GTA-online-Solo-Public-Lobby"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("About")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        frm = ttk.Frame(dlg, padding=12)
+        frm.grid()
+
+        ttk.Label(frm, text="Solo Public Lobby V -Online", font=("Segoe UI", 11, "bold")).grid(column=0, row=0, sticky="w", pady=(0,4))
+        ttk.Label(frm, text=f"Version: {VERSION}").grid(column=0, row=1, sticky="w", pady=(0,4))
+        ttk.Label(frm, text=f"Logs directory: {exe_dir()}").grid(column=0, row=2, sticky="w", pady=(0,8))
+
+        link = ttk.Label(frm, text=url, foreground="blue", cursor="hand2")
+        link.grid(column=0, row=3, sticky="w", pady=(0,10))
+        link.bind("<Button-1>", lambda e: webbrowser.open(url))
+
+        ttk.Button(frm, text="Close", command=dlg.destroy).grid(column=0, row=4, sticky="e")
+        dlg.wait_window()
 
     def quit(self):
         resp = queue.Queue()
@@ -981,8 +1573,8 @@ class App:
                 self.hotkeys = old_map
                 self.register_all_hotkeys()
 
-# (HotkeysDialog and the rest remain unchanged)
-# ----------------- elevation and main -----------------
+# HotkeysDialog and capture_hotkey_dialog remain as in your previous working version.
+
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -999,7 +1591,6 @@ def elevate_if_needed() -> None:
 
 def main():
     elevate_if_needed()
-    # set AppUserModelID early so Windows uses the correct taskbar grouping/icon
     try:
         set_taskbar_appid("com.solo_public_lobby.v.online")
     except Exception:
